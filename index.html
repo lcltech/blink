@@ -36,6 +36,17 @@
   </style>
 </head>
 <body>
+<script>
+// Bootstrap: sikre knapper virker selv hvis hovedscript indlæses sent
+window.__clickQueue = [];
+window.callFn = function(name){
+  try{
+    if (typeof window[name] === 'function') { return window[name](); }
+    window.__clickQueue.push(name);
+    var d=document.getElementById('diag'); if(d) d.textContent='Init afventer… '+name;
+  }catch(e){ var d=document.getElementById('diag'); if(d) d.textContent='bootstrap error: '+(e.message||e); }
+};
+</script>
 <div class="wrap">
   <header>
     <h1>Blinkkode‑læser <span class="badge">Ingen app – kun browser</span></h1>
@@ -50,11 +61,10 @@
     </div>
 
     <div class="uiRow">
-      <button id="btnStart" class="primary" onclick="try{startCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='startCam error: '+e;}">Åbn kamera</button>
-      <button id="btnStop" title="Stop kamera" disabled onclick="try{stopCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='stopCam error: '+e;}">Stop</button>
+      <button id="btnStart" class="primary" onclick="callFn('startCam')">Åbn kamera</button>
+      <button id="btnStop" title="Stop kamera" disabled onclick="callFn('stopCam')">Stop</button>
       <button id="btnCal" class="warn" title="Kør kort auto‑kalibrering">Kalibrér</button>
-      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="(function(){try{if(window.__runDiag){__runDiag();return;}var L=[];L.push('Version: inline-fallback');L.push('Script init: MANGLEDE (__runDiag undefined)');L.push('HTTPS: '+(location.protocol==='https:'||location.hostname==='localhost'));L.push('SecureContext: '+!!window.isSecureContext);try{L.push('Top-level: '+(window.top===window.self))}catch(_){L.push('Top-level: ukendt')}L.push('mediaDevices: '+!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia));var d=document.getElementById('diag');if(d)d.textContent=L.join('
-');}catch(e){var d=document.getElementById('diag');if(d)d.textContent='inline diag error: '+(e.message||e);}})()">Diagnose</button>
+      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="callFn('__runDiag')">Diagnose</button>
       <label class="pill">Pausegrænse <input id="pauseMs" type="number" value="900" style="width:76px;margin-left:6px"> ms</label>
       <label class="pill">ROI px <input id="roiSize" type="number" value="96" style="width:64px;margin-left:6px"></label>
       <label class="pill"><input id="lockCenter" type="checkbox" checked style="margin-right:6px">Fast ROI i midten</label>
@@ -119,7 +129,7 @@
 
 <script>
 // === VERSION ===
-var APP_VERSION = 'v0.12.4 (2025-10-07)';
+var APP_VERSION = 'v0.12.5 (2025-10-07)';
 (function(){ var v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
 
 // === KONFIG: Fejlkoder (rød 1/3/5) ===
@@ -339,6 +349,15 @@ function runTests(){ var results=[]; var pause=900; var tests=[ {name:'1) Enkelt
 ');
 }
 runTests();
+
+// Eksportér til globalt scope + dræn eventuelle klik i køen
+try{ window.__runDiag = __runDiag; }catch(_){}
+try{ window.startCam = startCam; }catch(_){}
+try{ window.stopCam = stopCam; }catch(_){}
+
+document.addEventListener('DOMContentLoaded', function(){
+  try{ var q=window.__clickQueue||[]; while(q.length){ var n=q.shift(); if(typeof window[n]==='function'){ try{ window[n](); }catch(e){} } } }catch(_){ }
+});
 </script>
 </body>
 </html>
