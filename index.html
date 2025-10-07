@@ -50,10 +50,10 @@
     </div>
 
     <div class="uiRow">
-      <button id="btnStart" class="primary">Åbn kamera</button>
-      <button id="btnStop" title="Stop kamera" disabled>Stop</button>
+      <button id="btnStart" class="primary" onclick="try{startCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='startCam error: '+e;}">Åbn kamera</button>
+      <button id="btnStop" title="Stop kamera" disabled onclick="try{stopCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='stopCam error: '+e;}">Stop</button>
       <button id="btnCal" class="warn" title="Kør kort auto‑kalibrering">Kalibrér</button>
-      <button id="btnDiag" title="Vis diagnose og fallbacks">Diagnose</button>
+      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="try{if(window.__runDiag){__runDiag()}else{var d=document.getElementById('diag'); if(d) d.textContent='Diag-knap virker – afventer JS init';}}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='diag error: '+e;}">Diagnose</button>
       <label class="pill">Pausegrænse <input id="pauseMs" type="number" value="900" style="width:76px;margin-left:6px"> ms</label>
       <label class="pill">ROI px <input id="roiSize" type="number" value="96" style="width:64px;margin-left:6px"></label>
       <label class="pill"><input id="lockCenter" type="checkbox" checked style="margin-right:6px">Fast ROI i midten</label>
@@ -118,7 +118,7 @@
 
 <script>
 // === VERSION ===
-const APP_VERSION = 'v0.12.1 (2025-10-07)';
+const APP_VERSION = 'v0.12.2 (2025-10-07)';
 (() => { const v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
 
 // === KONFIG: Fejlkoder (rød 1/3/5) ===
@@ -206,7 +206,9 @@ async function startCam(){
     setupOverlay();
     loop();
   }catch(e){
-    els.diag.textContent = 'Kamera nægtet/fejl: '+ e.name + ' – ' + e.message + '\n• Chrome: klik 🔒 → Site settings → Camera: Allow\n• iOS/Safari: aA → Website Settings → Camera: Allow';
+    els.diag.textContent = 'Kamera nægtet/fejl: '+ e.name + ' – ' + e.message + '
+• Chrome: klik 🔒 → Site settings → Camera: Allow
+• iOS/Safari: aA → Website Settings → Camera: Allow';
     setState('Kamera‑fejl');
   }
 }
@@ -275,31 +277,39 @@ function loop(){ if(!running) return; rafId=requestAnimationFrame(loop); const v
   drawRoi(); if(!roi){ els.statLevel.textContent='ROI ikke klar endnu…'; return }
   const smp=sampleROI(ctx); const {yLum,r,g,b,shape}=smp; n++; const d=yLum - mu; mu += d/n; s2 += d*(yLum - mu); const sigma=Math.sqrt(s2/Math.max(1,n-1)); const thHi=mu+3*sigma, thLo=mu+1*sigma; let nowOn=phaseOn; if(yLum>thHi && shape>=MIN_SHAPE) nowOn=true; else if(yLum<thLo) nowOn=false; const col= nowOn? classifyColor(r,g,b) : 'off'; els.statColor.textContent = nowOn? col : 'off'; processSample(nowOn,col,performance.now()); els.statLevel.textContent = (nowOn? 'ON':'off')+' · Y='+fmt(yLum)+' μ='+fmt(mu)+' σ='+fmt(sigma)+' thHi='+fmt(thHi)+' shape='+fmt(shape); }
 
-function showLookup(code){ const e=ERROR_MAP[code]; if(e){ els.lookup.textContent = code+' blink'+(code===1?'':'s')+' (rød) → '+e.title+'\nLøsning: '+e.fix+'\nDetaljer: '+e.details; els.codeExplain.textContent = code+': '+e.title+'\n'+e.fix+'\n'+e.details } else { els.lookup.textContent = code+' blinks → Ukendt kode. Tilpas ERROR_MAP i kilden.'; els.codeExplain.textContent = 'Ukendt kode: '+code+'. Opdatér ERROR_MAP.' } }
+function showLookup(code){ const e=ERROR_MAP[code]; if(e){ els.lookup.textContent = code+' blink'+(code===1?'':'s')+' (rød) → '+e.title+'
+Løsning: '+e.fix+'
+Detaljer: '+e.details; els.codeExplain.textContent = code+': '+e.title+'
+'+e.fix+'
+'+e.details } else { els.lookup.textContent = code+' blinks → Ukendt kode. Tilpas ERROR_MAP i kilden.'; els.codeExplain.textContent = 'Ukendt kode: '+code+'. Opdatér ERROR_MAP.' } }
 
 // === Robust UI binding (Chrome skærpelser 2025) ===
-function bindUI(){
-  if(els.btnStart){ els.btnStart.onclick = startCam }
-  if(els.btnStop){ els.btnStop.onclick = stopCam }
-  if(els.btnCal){ els.btnCal.onclick = ()=>{ mu=0; s2=0; n=0; } }
-  if(els.btnDiag){ els.btnDiag.onclick = async ()=>{
-    const L=[]; L.push('Version: '+APP_VERSION); L.push('User gesture OK? '+(navigator.userActivation?.isActive||false)); L.push('URL: '+location.href);
-    L.push('HTTPS: '+(location.protocol==='https:' || location.hostname==='localhost'));
-    L.push('SecureContext: '+(!!window.isSecureContext));
-    try{ L.push('Top‑level: '+(window.top===window.self)); }catch(_){ L.push('Top‑level: ukendt (cross‑origin)') }
-    L.push('mediaDevices: '+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)));
-    try{ const perm = navigator.permissions && navigator.permissions.query ? await navigator.permissions.query({name:'camera'}) : null; if(perm) L.push('Permission(camera): '+perm.state) }catch(_){}
-    try{ const tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); tmp.getTracks().forEach(t=>t.stop()); L.push('Probe: getUserMedia OK (tilladelse givet).'); }catch(e){ L.push('Probe fejl: '+e.name+' – '+e.message) }
-    L.push('document.hasFocus: '+document.hasFocus());
-    els.diag.textContent = L.join('\n');
-  } }
-  if(els.btnCenter){ els.btnCenter.onclick = ()=>{ centerROI(); drawRoi(); } }
-  if(els.roiSize){ els.roiSize.onchange = ()=>{ if(els.lockCenter.checked){ centerROI(); drawRoi(); } } }
-  if(els.btnManual){ els.btnManual.onclick = ()=>{ const nn=parseInt(els.manualCount.value||''); if(!isNaN(nn)) showLookup(nn) } }
+function __runDiag(){
+  const L=[]; L.push('Version: '+APP_VERSION); L.push('User gesture OK? '+(navigator.userActivation?.isActive||false)); L.push('URL: '+location.href);
+  L.push('HTTPS: '+(location.protocol==='https:' || location.hostname==='localhost'));
+  L.push('SecureContext: '+(!!window.isSecureContext));
+  try{ L.push('Top‑level: '+(window.top===window.self)); }catch(_){ L.push('Top‑level: ukendt (cross‑origin)') }
+  L.push('mediaDevices: '+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)));
+  (async ()=>{ try{ if(navigator.permissions?.query){ const perm=await navigator.permissions.query({name:'camera'}); L.push('Permission(camera): '+perm.state); }
+    const tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); tmp.getTracks().forEach(t=>t.stop()); L.push('Probe: getUserMedia OK (tilladelse givet).'); }
+    catch(e){ L.push('Probe fejl: '+e.name+' – '+e.message) }
+    const d=document.getElementById('diag'); if(d) d.textContent=L.join('\n'); })();
 }
+function bindUI(){
+  if(els.btnStart) els.btnStart.onclick = startCam;
+  if(els.btnStop) els.btnStop.onclick = stopCam;
+  if(els.btnCal) els.btnCal.onclick = ()=>{ mu=0; s2=0; n=0; };
+  if(els.btnDiag) els.btnDiag.onclick = __runDiag;
+  if(els.btnCenter) els.btnCenter.onclick = ()=>{ centerROI(); drawRoi(); };
+  if(els.roiSize) els.roiSize.onchange = ()=>{ if(els.lockCenter.checked){ centerROI(); drawRoi(); } };
+  if(els.btnManual) els.btnManual.onclick = ()=>{ const nn=parseInt(els.manualCount.value||''); if(!isNaN(nn)) showLookup(nn) };
+}
+window.addEventListener('DOMContentLoaded', ()=>{ try{ bindUI(); console.log('Init OK (DOMContentLoaded)', APP_VERSION);}catch(e){ const d=document.getElementById('diag'); if(d) d.textContent='Bind error: '+e; }});
+window.addEventListener('load', ()=>{ try{ if(!els.btnStart.onclick) bindUI(); console.log('Init OK (load)', APP_VERSION);}catch(e){ const d=document.getElementById('diag'); if(d) d.textContent='Bind(load) error: '+e; }});
 
-// Bind på DOMContentLoaded (sikrer gesture‑bindinger i Chrome)
-document.addEventListener('DOMContentLoaded', ()=>{ bindUI(); console.log('Init OK', APP_VERSION); });
+// Global fejl-fanger → vis i Diagnose-panelet
+window.onerror = function(msg, src, line, col, err){ const d=document.getElementById('diag'); if(d) d.textContent = 'JS-fejl: '+msg+' @'+line+':'+col; };
+window.onunhandledrejection = function(e){ const d=document.getElementById('diag'); if(d) d.textContent = 'Promise-fejl: '+(e.reason?.message||e.reason||'ukendt'); };
 
 // === TESTS (ingen kamera krævet) ===
 function decodeCyclesFromOnEdges(tsArray, pause){ const out=[]; let c=0; let prev; for(const t of tsArray){ if(prev!==undefined && (t-prev)>=pause){ if(c>0) out.push(c); c=0 } c++; prev=t } if(c>0) out.push(c); return out }
