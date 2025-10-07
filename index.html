@@ -17,9 +17,10 @@
     canvas{display:none}
     .overlay{position:absolute;inset:0;pointer-events:none}
     .uiRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    button,select,input{background:#122030;border:1px solid #213245;color:var(--fg);border-radius:10px;padding:10px 12px;font-size:14px}
+    button,select,input{background:#122030;border:1px solid #213245;color:var(--fg);border-radius:10px;padding:10px 12px;font-size:14px;cursor:pointer}
     button.primary{background:var(--acc);color:#041312;border:0;font-weight:600}
     button.warn{background:var(--warn);color:#221a00;border:0;font-weight:600}
+    button:disabled{opacity:.6;cursor:not-allowed}
     .pill{padding:6px 10px;border-radius:999px;background:#0e1a28;border:1px solid #203044;color:var(--muted);font-size:12px}
     .panel{border:1px solid #1a2430;border-radius:14px;padding:12px;background:#0f1622}
     .grid{display:grid;grid-template-columns:1fr;gap:12px}
@@ -50,7 +51,7 @@
 
     <div class="uiRow">
       <button id="btnStart" class="primary">Åbn kamera</button>
-      <button id="btnStop" title="Stop kamera">Stop</button>
+      <button id="btnStop" title="Stop kamera" disabled>Stop</button>
       <button id="btnCal" class="warn" title="Kør kort auto‑kalibrering">Kalibrér</button>
       <button id="btnDiag" title="Vis diagnose og fallbacks">Diagnose</button>
       <label class="pill">Pausegrænse <input id="pauseMs" type="number" value="900" style="width:76px;margin-left:6px"> ms</label>
@@ -87,7 +88,7 @@
       <strong>Instruktion</strong>
       <ol>
         <li>Tryk <em>Åbn kamera</em> og giv tilladelse.</li>
-        <li>Hold den blinkende **røde** LED i **rammen midt på videoen** (hvid firkant). Klik er ikke nødvendigt.</li>
+        <li>Hold den blinkende <strong>røde</strong> LED i <strong>rammen midt på videoen</strong> (hvid firkant). Klik er ikke nødvendigt.</li>
         <li>Vent én gentagelse. Koden vises automatisk.</li>
       </ol>
       <div class="footer">“Blink” iht. krav: OFF ≥ 100 ms efterfulgt af ON ≥ 100 ms. 7‑segment display ignoreres via form‑detektor.</div>
@@ -117,8 +118,8 @@
 
 <script>
 // === VERSION ===
-const APP_VERSION = 'v0.12.0 (2025-10-07)';
-(function(){ const v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
+const APP_VERSION = 'v0.12.1 (2025-10-07)';
+(() => { const v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
 
 // === KONFIG: Fejlkoder (rød 1/3/5) ===
 const ERROR_MAP = {
@@ -128,7 +129,7 @@ const ERROR_MAP = {
 };
 
 // === STATE ===
-var els = {
+const els = {
   video: document.getElementById('video'),
   canvas: document.getElementById('canvas'),
   overlay: document.getElementById('overlay'),
@@ -154,73 +155,70 @@ var els = {
   diag: document.getElementById('diag')
 };
 
-var stream=null, running=false, rafId=null;
-var roi = null; // {x,y,size}
-var mu=0, s2=0, n=0; // adaptiv luminans
-var OFF_MIN=100, ON_MIN=100; // iht. SW7
-var phaseOn=false, phaseTs=0, offOk=false, onColorAtRise='unknown';
-var unitCount=0, lastUnitTs=0, lastCycle=0;
+let stream=null, running=false, rafId=null;
+let roi = null; // {x,y,size}
+let mu=0, s2=0, n=0; // adaptiv luminans
+const OFF_MIN=100, ON_MIN=100; // iht. SW7
+let phaseOn=false, phaseTs=0, offOk=false, onColorAtRise='unknown';
+let unitCount=0, lastUnitTs=0, lastCycle=0;
 const MIN_SHAPE = 0.05; // LED‑formkrav (center vs ring)
 
-function fmt(x){return Math.round(x*10)/10}
-function setState(s){ els.statState.textContent=s }
+const fmt = x => Math.round(x*10)/10;
+const setState = s => { els.statState.textContent=s };
 
-function classifyColor(r,g,b){
-  var sum = r+g+b+1e-6; var rn=r/sum, gn=g/sum;
+const classifyColor = (r,g,b) => {
+  const sum = r+g+b+1e-6; const rn=r/sum, gn=g/sum;
   if(rn/gn > 1.4) return 'red'; if(gn/rn > 1.4) return 'green'; return 'orange';
-}
-function matchesFilter(color){
-  var m = els.colorSel.value; if(m==='any') return true; if(m==='red') return color==='red'; if(m==='red_or_orange') return (color==='red'||color==='orange'); return true;
-}
+};
+const matchesFilter = color => {
+  const m = els.colorSel.value; if(m==='any') return true; if(m==='red') return color==='red'; if(m==='red_or_orange') return (color==='red'||color==='orange'); return true;
+};
 
 function centerROI(){
-  var vw = els.video.videoWidth||0, vh = els.video.videoHeight||0;
-  if(!vw||!vh) return;
-  var size = Math.max(8, Math.min(vw, vh, parseInt(els.roiSize.value)||96));
-  roi = { x: vw/2, y: vh/2, size: size };
+  const vw = els.video.videoWidth||0, vh = els.video.videoHeight||0; if(!vw||!vh) return;
+  const size = Math.max(8, Math.min(vw, vh, parseInt(els.roiSize.value)||96));
+  roi = { x: vw/2, y: vh/2, size };
 }
 
 async function startCam(){
   try{
     if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) throw new Error('Browser mangler getUserMedia');
     if(!window.isSecureContext) throw new Error('Kræver HTTPS eller http://localhost');
-    try{ if(window.top !== window.self) throw new Error('Siden kører i en iframe/sandbox – åbnes i Safari/Chrome som selvstændig fane'); }catch(_){ }
+    try{ if(window.top !== window.self) throw new Error('Siden er indlejret (iframe) – åbnes som selvstændig fane'); }catch(_){ }
 
-    var tries = [
+    const tries = [
       { video: { facingMode: { ideal: 'environment' } }, audio:false },
       { video: { facingMode: 'environment' }, audio:false },
       { video: true, audio:false }
     ];
-    var errLast=null;
-    for(var i=0;i<tries.length;i++){
-      try{ stream = await navigator.mediaDevices.getUserMedia(tries[i]); break; }
-      catch(e){ errLast = e; }
-    }
+    let errLast=null;
+    for(const c of tries){ try{ stream = await navigator.mediaDevices.getUserMedia(c); break } catch(e){ errLast=e } }
     if(!stream) throw errLast || new Error('Ukendt kamera‑fejl');
 
     els.video.srcObject = stream; await els.video.play();
     mu=0; s2=0; n=0; phaseOn=false; phaseTs=performance.now(); offOk=false; unitCount=0; lastUnitTs=0; lastCycle=0;
     running=true; setState('Kører');
 
-    // Sæt ROI til center når metadata er klar
     if(els.video.readyState>=2) centerROI();
-    els.video.addEventListener('loadedmetadata', function(){ centerROI(); }, {once:true});
+    els.video.addEventListener('loadedmetadata', ()=>{ centerROI(); }, {once:true});
 
+    els.btnStart.disabled = true; els.btnStop.disabled = false;
     setupOverlay();
     loop();
   }catch(e){
-    els.diag.textContent = 'Kamera nægtet/fejl: '+ e.name + ' – ' + e.message + '
-• Åbn i Safari/Chrome (ikke in‑app)
-• Settings > Browser > Camera → Allow
-• På siden: Website Settings → Camera → Allow';
+    els.diag.textContent = 'Kamera nægtet/fejl: '+ e.name + ' – ' + e.message + '\n• Chrome: klik 🔒 → Site settings → Camera: Allow\n• iOS/Safari: aA → Website Settings → Camera: Allow';
     setState('Kamera‑fejl');
   }
 }
 
-function stopCam(){ running=false; cancelAnimationFrame(rafId); if(stream){ stream.getTracks().forEach(function(t){t.stop()}); stream=null } setState('Stoppet') }
+function stopCam(){
+  running=false; cancelAnimationFrame(rafId);
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null }
+  setState('Stoppet'); els.btnStart.disabled=false; els.btnStop.disabled=true;
+}
 
 function setupOverlay(){
-  const update = ()=>{ const vw=els.video.videoWidth||0,vh=els.video.videoHeight||0; els.canvas.width=vw; els.canvas.height=vh; };
+  const update = ()=>{ const vw=els.video.videoWidth||0,vh=els.video.videoHeight||0; els.canvas.width=vw; els.canvas.height=vh; drawRoi(); };
   if(els.video.readyState>=2) update();
   els.video.addEventListener('loadedmetadata', update, {once:true});
 }
@@ -238,83 +236,81 @@ function drawRoi(){
   r.setAttribute('width', s); r.setAttribute('height', s);
   r.setAttribute('rx', 10); r.setAttribute('ry', 10);
   r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#ffffff'); r.setAttribute('stroke-width', '2');
-  const cross1=document.createElementNS(ns,'line');
-  cross1.setAttribute('x1', x-8); cross1.setAttribute('y1', y);
-  cross1.setAttribute('x2', x+8); cross1.setAttribute('y2', y);
-  cross1.setAttribute('stroke', '#ffffff'); cross1.setAttribute('stroke-width', '2');
-  const cross2=document.createElementNS(ns,'line');
-  cross2.setAttribute('x1', x); cross2.setAttribute('y1', y-8);
-  cross2.setAttribute('x2', x); cross2.setAttribute('y2', y+8);
-  cross2.setAttribute('stroke', '#ffffff'); cross2.setAttribute('stroke-width', '2');
+  const cross1=document.createElementNS(ns,'line'); cross1.setAttribute('x1', x-8); cross1.setAttribute('y1', y); cross1.setAttribute('x2', x+8); cross1.setAttribute('y2', y); cross1.setAttribute('stroke', '#ffffff'); cross1.setAttribute('stroke-width', '2');
+  const cross2=document.createElementNS(ns,'line'); cross2.setAttribute('x1', x); cross2.setAttribute('y1', y-8); cross2.setAttribute('x2', x); cross2.setAttribute('y2', y+8); cross2.setAttribute('stroke', '#ffffff'); cross2.setAttribute('stroke-width', '2');
   svg.appendChild(r); svg.appendChild(cross1); svg.appendChild(cross2);
 }
 
 function sampleROI(ctx){
   if(!roi){ return { yLum:0, r:0, g:0, b:0, shape:0 }; }
-  var s=roi.size|0; var x0=Math.max(0, Math.min(els.canvas.width-s, (roi.x - s/2)|0));
-  var y0=Math.max(0, Math.min(els.canvas.height-s, (roi.y - s/2)|0));
-  var img=ctx.getImageData(x0,y0,s,s); var data=img.data; var r=0,g=0,b=0,c=0; var lumTotal=0; var lumCenter=0, cntCenter=0;
-  var cx=s/2, cy=s/2; var rad = s*0.25;
-  for(var y=0;y<s;y++){
-    for(var x=0;x<s;x++){
-      var i=(y*s + x)*4; var R=data[i], G=data[i+1], B=data[i+2];
-      var lum = 0.2126*R + 0.7152*G + 0.0722*B; lumTotal += lum;
+  const s=roi.size|0; const x0=Math.max(0, Math.min(els.canvas.width-s, (roi.x - s/2)|0));
+  const y0=Math.max(0, Math.min(els.canvas.height-s, (roi.y - s/2)|0));
+  const img=ctx.getImageData(x0,y0,s,s); const data=img.data; let r=0,g=0,b=0,c=0; let lumTotal=0; let lumCenter=0, cntCenter=0;
+  const cx=s/2, cy=s/2; const rad = s*0.25;
+  for(let y=0;y<s;y++){
+    for(let x=0;x<s;x++){
+      const i=(y*s + x)*4; const R=data[i], G=data[i+1], B=data[i+2];
+      const lum = 0.2126*R + 0.7152*G + 0.0722*B; lumTotal += lum;
       r+=R; g+=G; b+=B; c++;
-      var dx=x-cx, dy=y-cy; if(dx*dx + dy*dy <= rad*rad){ lumCenter += lum; cntCenter++; }
+      const dx=x-cx, dy=y-cy; if(dx*dx + dy*dy <= rad*rad){ lumCenter += lum; cntCenter++; }
     }
   }
-  r/=c; g/=c; b/=c; var yLum = lumTotal/c/255; var centerAvg = (cntCenter? (lumCenter/cntCenter) : 0)/255; var outerAvg = ((lumTotal - lumCenter)/Math.max(1,(c - cntCenter)))/255; var shape = centerAvg - outerAvg;
-  return { yLum:yLum, r:r, g:g, b:b, shape:shape };
+  r/=c; g/=c; b/=c; const yLum = lumTotal/c/255; const centerAvg = (cntCenter? (lumCenter/cntCenter) : 0)/255; const outerAvg = ((lumTotal - lumCenter)/Math.max(1,(c - cntCenter)))/255; const shape = centerAvg - outerAvg;
+  return { yLum, r, g, b, shape };
 }
 
-function processSample(on, color, now){ if(on!==phaseOn){ var dur=now - phaseTs; if(!phaseOn && on){ if(dur>=OFF_MIN){ offOk=true } onColorAtRise=color } else if(phaseOn && !on){ if(dur>=ON_MIN && offOk && matchesFilter(onColorAtRise)){ unitCount++; lastUnitTs=now; els.statBlinks.textContent=String(unitCount) } offOk=false } phaseOn=on; phaseTs=now } var pauseMs=parseInt(els.pauseMs.value)||900; if(unitCount>0 && (now - lastUnitTs) >= pauseMs){ lastCycle=unitCount; unitCount=0; els.statBlinks.textContent='0'; els.statLast.textContent=String(lastCycle); showLookup(lastCycle) } }
+function processSample(on, color, now){
+  if(on!==phaseOn){
+    const dur=now - phaseTs;
+    if(!phaseOn && on){ if(dur>=OFF_MIN){ offOk=true } onColorAtRise=color }
+    else if(phaseOn && !on){ if(dur>=ON_MIN && offOk && matchesFilter(onColorAtRise)){ unitCount++; lastUnitTs=now; els.statBlinks.textContent=String(unitCount) } offOk=false }
+    phaseOn=on; phaseTs=now
+  }
+  const pauseMs=parseInt(els.pauseMs.value)||900;
+  if(unitCount>0 && (now - lastUnitTs) >= pauseMs){ lastCycle=unitCount; unitCount=0; els.statBlinks.textContent='0'; els.statLast.textContent=String(lastCycle); showLookup(lastCycle) }
+}
 
 function loop(){ if(!running) return; rafId=requestAnimationFrame(loop); const v=els.video; if(!v.videoWidth) return; const ctx=els.canvas.getContext('2d',{willReadFrequently:true}); ctx.drawImage(v,0,0,els.canvas.width,els.canvas.height);
-  // hold ROI centreret hvis låst
   if(els.lockCenter.checked && (!roi || roi.size !== (parseInt(els.roiSize.value)||96))) centerROI();
-  drawRoi();
-  if(!roi){ els.statLevel.textContent='ROI ikke klar endnu…'; return }
-  const smp=sampleROI(ctx); const yLum=smp.yLum, r=smp.r, g=smp.g, b=smp.b, shape=smp.shape;
-  n++; const d=yLum - mu; mu += d/n; s2 += d*(yLum - mu); const sigma=Math.sqrt(s2/Math.max(1,n-1)); const thHi=mu+3*sigma, thLo=mu+1*sigma;
-  let nowOn=phaseOn; if(yLum>thHi && shape>=MIN_SHAPE) nowOn=true; else if(yLum<thLo) nowOn=false;
-  const col= nowOn? classifyColor(r,g,b) : 'off'; els.statColor.textContent = nowOn? col : 'off';
-  processSample(nowOn,col,performance.now()); els.statLevel.textContent = (nowOn? 'ON':'off')+' · Y='+fmt(yLum)+' μ='+fmt(mu)+' σ='+fmt(sigma)+' thHi='+fmt(thHi)+' shape='+fmt(shape);
+  drawRoi(); if(!roi){ els.statLevel.textContent='ROI ikke klar endnu…'; return }
+  const smp=sampleROI(ctx); const {yLum,r,g,b,shape}=smp; n++; const d=yLum - mu; mu += d/n; s2 += d*(yLum - mu); const sigma=Math.sqrt(s2/Math.max(1,n-1)); const thHi=mu+3*sigma, thLo=mu+1*sigma; let nowOn=phaseOn; if(yLum>thHi && shape>=MIN_SHAPE) nowOn=true; else if(yLum<thLo) nowOn=false; const col= nowOn? classifyColor(r,g,b) : 'off'; els.statColor.textContent = nowOn? col : 'off'; processSample(nowOn,col,performance.now()); els.statLevel.textContent = (nowOn? 'ON':'off')+' · Y='+fmt(yLum)+' μ='+fmt(mu)+' σ='+fmt(sigma)+' thHi='+fmt(thHi)+' shape='+fmt(shape); }
+
+function showLookup(code){ const e=ERROR_MAP[code]; if(e){ els.lookup.textContent = code+' blink'+(code===1?'':'s')+' (rød) → '+e.title+'\nLøsning: '+e.fix+'\nDetaljer: '+e.details; els.codeExplain.textContent = code+': '+e.title+'\n'+e.fix+'\n'+e.details } else { els.lookup.textContent = code+' blinks → Ukendt kode. Tilpas ERROR_MAP i kilden.'; els.codeExplain.textContent = 'Ukendt kode: '+code+'. Opdatér ERROR_MAP.' } }
+
+// === Robust UI binding (Chrome skærpelser 2025) ===
+function bindUI(){
+  if(els.btnStart){ els.btnStart.onclick = startCam }
+  if(els.btnStop){ els.btnStop.onclick = stopCam }
+  if(els.btnCal){ els.btnCal.onclick = ()=>{ mu=0; s2=0; n=0; } }
+  if(els.btnDiag){ els.btnDiag.onclick = async ()=>{
+    const L=[]; L.push('Version: '+APP_VERSION); L.push('User gesture OK? '+(navigator.userActivation?.isActive||false)); L.push('URL: '+location.href);
+    L.push('HTTPS: '+(location.protocol==='https:' || location.hostname==='localhost'));
+    L.push('SecureContext: '+(!!window.isSecureContext));
+    try{ L.push('Top‑level: '+(window.top===window.self)); }catch(_){ L.push('Top‑level: ukendt (cross‑origin)') }
+    L.push('mediaDevices: '+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)));
+    try{ const perm = navigator.permissions && navigator.permissions.query ? await navigator.permissions.query({name:'camera'}) : null; if(perm) L.push('Permission(camera): '+perm.state) }catch(_){}
+    try{ const tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); tmp.getTracks().forEach(t=>t.stop()); L.push('Probe: getUserMedia OK (tilladelse givet).'); }catch(e){ L.push('Probe fejl: '+e.name+' – '+e.message) }
+    L.push('document.hasFocus: '+document.hasFocus());
+    els.diag.textContent = L.join('\n');
+  } }
+  if(els.btnCenter){ els.btnCenter.onclick = ()=>{ centerROI(); drawRoi(); } }
+  if(els.roiSize){ els.roiSize.onchange = ()=>{ if(els.lockCenter.checked){ centerROI(); drawRoi(); } } }
+  if(els.btnManual){ els.btnManual.onclick = ()=>{ const nn=parseInt(els.manualCount.value||''); if(!isNaN(nn)) showLookup(nn) } }
 }
 
-function showLookup(code){ var e=ERROR_MAP[code]; if(e){ els.lookup.textContent = code+' blink'+(code===1?'':'s')+' (rød) → '+e.title+'
-Løsning: '+e.fix+'
-Detaljer: '+e.details; els.codeExplain.textContent = code+': '+e.title+'
-'+e.fix+'
-'+e.details } else { els.lookup.textContent = code+' blinks → Ukendt kode. Tilpas ERROR_MAP i kilden.'; els.codeExplain.textContent = 'Ukendt kode: '+code+'. Opdatér ERROR_MAP.' } }
-
-// UI hooks
-if(els.btnStart) els.btnStart.addEventListener('click', startCam);
-if(els.btnStop) els.btnStop.addEventListener('click', stopCam);
-if(els.btnCal) els.btnCal.addEventListener('click', function(){ mu=0; s2=0; n=0; });
-if(els.btnDiag) els.btnDiag.addEventListener('click', function(){
-  var L=[]; L.push('Version: '+APP_VERSION); L.push('URL: '+location.href);
-  L.push('HTTPS: '+(location.protocol==='https:' || location.hostname==='localhost'));
-  L.push('SecureContext: '+(!!window.isSecureContext));
-  try{ L.push('Top‑level: '+(window.top===window.self)); }catch(_){ L.push('Top‑level: ukendt (cross‑origin)') }
-  L.push('mediaDevices: '+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)));
-  (async function(){ try{ var tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); tmp.getTracks().forEach(function(t){t.stop()}); L.push('Probe: getUserMedia OK (tilladelse givet).'); }catch(e){ L.push('Probe fejl: '+e.name+' – '+e.message); } els.diag.textContent=L.join('
-'); })();
-});
-if(els.btnCenter) els.btnCenter.addEventListener('click', function(){ centerROI(); drawRoi(); });
-if(els.roiSize) els.roiSize.addEventListener('change', function(){ if(els.lockCenter.checked){ centerROI(); }});
-if(els.btnManual) els.btnManual.addEventListener('click', function(){ var nn=parseInt(els.manualCount.value||''); if(!isNaN(nn)) showLookup(nn) });
+// Bind på DOMContentLoaded (sikrer gesture‑bindinger i Chrome)
+document.addEventListener('DOMContentLoaded', ()=>{ bindUI(); console.log('Init OK', APP_VERSION); });
 
 // === TESTS (ingen kamera krævet) ===
-function decodeCyclesFromOnEdges(tsArray, pause){ var out=[]; var c=0; var prev; for(var i=0;i<tsArray.length;i++){ var t=tsArray[i]; if(prev!==undefined && (t-prev)>=pause){ if(c>0) out.push(c); c=0 } c++; prev=t } if(c>0) out.push(c); return out }
-function simulateBlinkSequence(seq, pause, filter){ phaseOn=false; phaseTs=0; offOk=false; unitCount=0; lastUnitTs=0; lastCycle=0; els.colorSel.value = filter||'red'; var t=0; for(var i=0;i<seq.length;i++){ var s=seq[i]; var steps=Math.max(1,Math.round(s.dur/50)); for(var j=0;j<steps;j++){ processSample(s.on,s.color,t); t+=50 } } processSample(false,'off',t+pause+10); return lastCycle }
-function runTests(){ var results=[]; var pause=900; var tests=[ {name:'1) Enkelt cyklus, 3 blinks', inp:[100,300,500], exp:[3]}, {name:'2) To cyklusser 2 + 5', inp:[0,200, 2000,2200,2400,2600,2800], exp:[2,5]}, {name:'3) Grænsetilfælde præcis ved pause (split)', inp:[0,200, 1100,1300], exp:[2,2]}, {name:'4) Hurtige blinks (ingen split)', inp:[0,150,260,370,480], exp:[5]}, {name:'5) Tom input', inp:[], exp:[]}, {name:'6) Opslag eksisterende kode (3)', inp:[0,100,200], exp:[3], mapCheck:3}, {name:'7) Opslag ukendt kode (7)', inp:[0,100,200,300,400,500,600], exp:[7], mapCheck:7}, {name:'8) Single blink', inp:[500], exp:[1]}, {name:'9) Stor pause før første', inp:[2000,2100], exp:[2]}, {name:'10) Tre cyklusser 1+1+1', inp:[0, 2000, 4000], exp:[1,1,1]} ];
-  for(var k=0;k<tests.length;k++){ var t=tests[k]; var got=decodeCyclesFromOnEdges(t.inp,pause); var ok=JSON.stringify(got)===JSON.stringify(t.exp); if(!ok){ results.push('❌ '+t.name+': exp '+JSON.stringify(t.exp)+' got '+JSON.stringify(got)); continue } if(t.mapCheck!==undefined){ var has=!!ERROR_MAP[t.mapCheck]; if(t.mapCheck===3 && !has) results.push('❌ Opslag: forventede kode 3 i ERROR_MAP'); else if(t.mapCheck===7 && has) results.push('❌ Opslag: kode 7 burde være ukendt i ERROR_MAP'); else results.push('✅ '+t.name) } else { results.push('✅ '+t.name) } }
-  // SW7 + farve + form
-  var seq1=[ {dur:200,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'} ]; var got1=simulateBlinkSequence(seq1,pause,'red'); results.push(got1===3? '✅ 11) SW7: 3 gyldige røde blinks' : '❌ 11) SW7: exp 3 got '+got1);
-  var seq2=[ {dur:80,on:false,color:'off'}, {dur:150,on:true,color:'red'} ]; var got2=simulateBlinkSequence(seq2,pause,'red'); results.push(got2===0? '✅ 12) OFF <100ms ignoreres' : '❌ 12) exp 0 got '+got2);
-  var seq3=[ {dur:150,on:false,color:'off'}, {dur:80,on:true,color:'red'} ]; var got3=simulateBlinkSequence(seq3,pause,'red'); results.push(got3===0? '✅ 13) ON <100ms ignoreres' : '❌ 13) exp 0 got '+got3);
-  els.tests.innerHTML = results.map(function(r){return r.indexOf('✅')===0? '<span class="pass">'+r+'</span>' : '<span class="fail">'+r+'</span>'}).join('
-'); }
+function decodeCyclesFromOnEdges(tsArray, pause){ const out=[]; let c=0; let prev; for(const t of tsArray){ if(prev!==undefined && (t-prev)>=pause){ if(c>0) out.push(c); c=0 } c++; prev=t } if(c>0) out.push(c); return out }
+function simulateBlinkSequence(seq, pause, filter){ phaseOn=false; phaseTs=0; offOk=false; unitCount=0; lastUnitTs=0; lastCycle=0; els.colorSel.value = filter||'red'; let t=0; for(const s of seq){ const steps=Math.max(1,Math.round(s.dur/50)); for(let i=0;i<steps;i++){ processSample(s.on,s.color,t); t+=50 } } processSample(false,'off',t+pause+10); return lastCycle }
+function runTests(){ const results=[]; const pause=900; const tests=[ {name:'1) Enkelt cyklus, 3 blinks', inp:[100,300,500], exp:[3]}, {name:'2) To cyklusser 2 + 5', inp:[0,200, 2000,2200,2400,2600,2800], exp:[2,5]}, {name:'3) Grænsetilfælde præcis ved pause (split)', inp:[0,200, 1100,1300], exp:[2,2]}, {name:'4) Hurtige blinks (ingen split)', inp:[0,150,260,370,480], exp:[5]}, {name:'5) Tom input', inp:[], exp:[]}, {name:'6) Opslag eksisterende kode (3)', inp:[0,100,200], exp:[3], mapCheck:3}, {name:'7) Opslag ukendt kode (7)', inp:[0,100,200,300,400,500,600], exp:[7], mapCheck:7}, {name:'8) Single blink', inp:[500], exp:[1]}, {name:'9) Stor pause før første', inp:[2000,2100], exp:[2]}, {name:'10) Tre cyklusser 1+1+1', inp:[0, 2000, 4000], exp:[1,1,1]} ];
+  for(const t of tests){ const got=decodeCyclesFromOnEdges(t.inp,pause); const ok=JSON.stringify(got)===JSON.stringify(t.exp); if(!ok){ results.push(`❌ ${t.name}: exp ${JSON.stringify(t.exp)} got ${JSON.stringify(got)}`); continue } if(t.mapCheck!==undefined){ const has=!!ERROR_MAP[t.mapCheck]; if(t.mapCheck===3 && !has) results.push('❌ Opslag: forventede kode 3 i ERROR_MAP'); else if(t.mapCheck===7 && has) results.push('❌ Opslag: kode 7 burde være ukendt i ERROR_MAP'); else results.push(`✅ ${t.name}`) } else { results.push(`✅ ${t.name}`) } }
+  const seq1=[ {dur:200,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'} ]; const got1=simulateBlinkSequence(seq1,pause,'red'); results.push(got1===3? '✅ 11) SW7: 3 gyldige røde blinks' : `❌ 11) SW7: exp 3 got ${got1}`);
+  const seq2=[ {dur:80,on:false,color:'off'}, {dur:150,on:true,color:'red'} ]; const got2=simulateBlinkSequence(seq2,pause,'red'); results.push(got2===0? '✅ 12) OFF <100ms ignoreres' : `❌ 12) exp 0 got ${got2}`);
+  const seq3=[ {dur:150,on:false,color:'off'}, {dur:80,on:true,color:'red'} ]; const got3=simulateBlinkSequence(seq3,pause,'red'); results.push(got3===0? '✅ 13) ON <100ms ignoreres' : `❌ 13) exp 0 got ${got3}`);
+  els.tests.innerHTML = results.map(r => r.startsWith('✅')? `<span class="pass">${r}</span>` : `<span class="fail">${r}</span>`).join('\n');
+}
 runTests();
 </script>
 </body>
