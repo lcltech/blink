@@ -46,14 +46,15 @@
     <div class="videoBox" id="videoBox">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="canvas"></canvas>
-      <svg class="overlay" id="overlay"></svg>
+      <svg class="overlay" id="overlay" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
 
     <div class="uiRow">
       <button id="btnStart" class="primary" onclick="try{startCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='startCam error: '+e;}">Åbn kamera</button>
       <button id="btnStop" title="Stop kamera" disabled onclick="try{stopCam()}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='stopCam error: '+e;}">Stop</button>
       <button id="btnCal" class="warn" title="Kør kort auto‑kalibrering">Kalibrér</button>
-      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="try{if(window.__runDiag){__runDiag()}else{var d=document.getElementById('diag'); if(d) d.textContent='Diag-knap virker – afventer JS init';}}catch(e){var d=document.getElementById('diag'); if(d) d.textContent='diag error: '+e;}">Diagnose</button>
+      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="(function(){try{if(window.__runDiag){__runDiag();return;}var L=[];L.push('Version: inline-fallback');L.push('Script init: MANGLEDE (__runDiag undefined)');L.push('HTTPS: '+(location.protocol==='https:'||location.hostname==='localhost'));L.push('SecureContext: '+!!window.isSecureContext);try{L.push('Top-level: '+(window.top===window.self))}catch(_){L.push('Top-level: ukendt')}L.push('mediaDevices: '+!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia));var d=document.getElementById('diag');if(d)d.textContent=L.join('
+');}catch(e){var d=document.getElementById('diag');if(d)d.textContent='inline diag error: '+(e.message||e);}})()">Diagnose</button>
       <label class="pill">Pausegrænse <input id="pauseMs" type="number" value="900" style="width:76px;margin-left:6px"> ms</label>
       <label class="pill">ROI px <input id="roiSize" type="number" value="96" style="width:64px;margin-left:6px"></label>
       <label class="pill"><input id="lockCenter" type="checkbox" checked style="margin-right:6px">Fast ROI i midten</label>
@@ -118,7 +119,7 @@
 
 <script>
 // === VERSION ===
-var APP_VERSION = 'v0.12.3 (2025-10-07)';
+var APP_VERSION = 'v0.12.4 (2025-10-07)';
 (function(){ var v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
 
 // === KONFIG: Fejlkoder (rød 1/3/5) ===
@@ -223,10 +224,8 @@ function setupOverlay(){
   function update(){
     var vw=els.video.videoWidth||0, vh=els.video.videoHeight||0;
     els.canvas.width=vw; els.canvas.height=vh;
-    var rect=els.video.getBoundingClientRect();
-    els.overlay.setAttribute('width', rect.width);
-    els.overlay.setAttribute('height', rect.height);
-    els.overlay.setAttribute('viewBox', '0 0 '+rect.width+' '+rect.height);
+    // Brug videoens native koordinater i SVG via viewBox (CSS håndterer størrelse)
+    els.overlay.setAttribute('viewBox','0 0 '+vw+' '+vh);
     drawRoi();
   }
   if(els.video.readyState>=2) update();
@@ -236,20 +235,17 @@ function setupOverlay(){
 
 function drawRoi(){
   var svg=els.overlay; svg.innerHTML=''; if(!roi) return;
-  var rect=els.video.getBoundingClientRect();
-  var vw=els.video.videoWidth, vh=els.video.videoHeight;
-  var arV=vw/vh, arB=rect.width/rect.height; var sx,sy,ox,oy;
-  if(arV>arB){ sx=rect.width / vw; sy=sx; ox=0; oy=(rect.height - vh*sy)/2 } else { sy=rect.height / vh; sx=sy; oy=0; ox=(rect.width - vw*sx)/2 }
-  var x=roi.x*sx+ox, y=roi.y*sy+oy, s=roi.size*sx;
+  var vw=els.video.videoWidth||0, vh=els.video.videoHeight||0; if(!vw||!vh) return;
+  var x=roi.x, y=roi.y, s=roi.size;
   var ns=svg.namespaceURI;
   var r=document.createElementNS(ns,'rect');
   r.setAttribute('x', x- s/2); r.setAttribute('y', y- s/2);
   r.setAttribute('width', s); r.setAttribute('height', s);
   r.setAttribute('rx', 10); r.setAttribute('ry', 10);
-  r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#ffffff'); r.setAttribute('stroke-width', '2');
-  var cross1=document.createElementNS(ns,'line'); cross1.setAttribute('x1', x-8); cross1.setAttribute('y1', y); cross1.setAttribute('x2', x+8); cross1.setAttribute('y2', y); cross1.setAttribute('stroke', '#ffffff'); cross1.setAttribute('stroke-width', '2');
-  var cross2=document.createElementNS(ns,'line'); cross2.setAttribute('x1', x); cross2.setAttribute('y1', y-8); cross2.setAttribute('x2', x); cross2.setAttribute('y2', y+8); cross2.setAttribute('stroke', '#ffffff'); cross2.setAttribute('stroke-width', '2');
-  svg.appendChild(r); svg.appendChild(cross1); svg.appendChild(cross2);
+  r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#ffffff'); r.setAttribute('stroke-width', '3');
+  var c1=document.createElementNS(ns,'line'); c1.setAttribute('x1', x-10); c1.setAttribute('y1', y); c1.setAttribute('x2', x+10); c1.setAttribute('y2', y); c1.setAttribute('stroke', '#ffffff'); c1.setAttribute('stroke-width', '3');
+  var c2=document.createElementNS(ns,'line'); c2.setAttribute('x1', x); c2.setAttribute('y1', y-10); c2.setAttribute('x2', x); c2.setAttribute('y2', y+10); c2.setAttribute('stroke', '#ffffff'); c2.setAttribute('stroke-width', '3');
+  svg.appendChild(r); svg.appendChild(c1); svg.appendChild(c2);
 }
 
 function sampleROI(ctx){
