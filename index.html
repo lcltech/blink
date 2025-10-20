@@ -1,363 +1,62 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="da">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Blinkkode‑læser (ingen app)</title>
-  <style>
-    :root { --bg:#0b0f14; --fg:#e8eef6; --muted:#93a3b3; --acc:#5dd4a3; --warn:#ffb703; --err:#ef476f; }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica,Arial}
-    .wrap{display:flex;flex-direction:column;min-height:100%}
-    header{padding:12px 16px;border-bottom:1px solid #1a2430;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-    header h1{font-size:18px;margin:0;font-weight:600}
-    .ver{font-size:12px;color:#93a3b3}
-    main{flex:1;display:flex;flex-direction:column;gap:12px;padding:12px}
-    .videoBox{position:relative;border-radius:16px;overflow:hidden;background:#0e1520;border:1px solid #1a2430}
-    video{width:100%;height:auto;display:block;background:black}
-    canvas{display:none}
-    .overlay{position:absolute;inset:0;pointer-events:none}
-    .uiRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    button,select,input{background:#122030;border:1px solid #213245;color:var(--fg);border-radius:10px;padding:10px 12px;font-size:14px;cursor:pointer}
-    button.primary{background:var(--acc);color:#041312;border:0;font-weight:600}
-    button.warn{background:var(--warn);color:#221a00;border:0;font-weight:600}
-    button:disabled{opacity:.6;cursor:not-allowed}
-    .pill{padding:6px 10px;border-radius:999px;background:#0e1a28;border:1px solid #203044;color:var(--muted);font-size:12px}
-    .panel{border:1px solid #1a2430;border-radius:14px;padding:12px;background:#0f1622}
-    .grid{display:grid;grid-template-columns:1fr;gap:12px}
-    @media(min-width:760px){.grid{grid-template-columns:1fr 1fr}}
-    .stat{display:flex;justify-content:space-between;color:var(--muted);font-size:14px}
-    .stat strong{color:var(--fg)}
-    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#0e1a28;border:1px solid #203044;margin-left:6px;font-size:12px;color:var(--muted)}
-    .status{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0c131d;border:1px solid #1a2430;border-radius:12px;padding:10px;white-space:pre-wrap;min-height:48px}
-    .footer{color:#8ea0b3;font-size:12px}
-    a{color:#a8e5ff}
-    .pass{color:#5dd4a3}
-    .fail{color:#ef476f}
-  </style>
-</head>
-<body>
-<script>
-// Bootstrap: sikre knapper virker selv hvis hovedscript indlæses sent
-window.__clickQueue = [];
-window.callFn = function(name){
-  try{
-    if (typeof window[name] === 'function') { return window[name](); }
-    window.__clickQueue.push(name);
-    var d=document.getElementById('diag'); if(d) d.textContent='Init afventer… '+name;
-  }catch(e){ var d=document.getElementById('diag'); if(d) d.textContent='bootstrap error: '+(e.message||e); }
-};
-</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DRHX – Table 3 (Input Status Bits)</title>
+<style>
+  body{font:15px system-ui,Segoe UI,Arial;margin:0;background:#fafafa}
+  .wrap{max-width:760px;margin:24px auto;padding:16px;background:#fff;border:1px solid #eee;border-radius:10px}
+  h1{font-size:18px;margin:0 0 10px}
+  p{color:#666;font-size:13px;margin:0 0 12px}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid #e5e5e5;padding:6px 8px}
+  th{background:#f6f6f6;text-align:left}
+  td.state{white-space:nowrap}
+</style>
 <div class="wrap">
-  <header>
-    <h1>Blinkkode‑læser <span class="badge">Ingen app – kun browser</span></h1>
-    <div class="pill">1) Åbn kamera · 2) Hold LED midt i rammen · 3) Læs fejlen</div>
-    <div class="ver" id="ver"></div>
-  </header>
-  <main>
-    <div class="videoBox" id="videoBox">
-      <video id="video" playsinline muted autoplay></video>
-      <canvas id="canvas"></canvas>
-      <svg class="overlay" id="overlay" preserveAspectRatio="xMidYMid meet"></svg>
-    </div>
-
-    <div class="uiRow">
-      <button id="btnStart" class="primary" onclick="callFn('startCam')">Åbn kamera</button>
-      <button id="btnStop" title="Stop kamera" disabled onclick="callFn('stopCam')">Stop</button>
-      <button id="btnCal" class="warn" title="Kør kort auto‑kalibrering">Kalibrér</button>
-      <button id="btnDiag" title="Vis diagnose og fallbacks" onclick="callFn('__runDiag')">Diagnose</button>
-      <label class="pill">Pausegrænse <input id="pauseMs" type="number" value="900" style="width:76px;margin-left:6px"> ms</label>
-      <label class="pill">ROI px <input id="roiSize" type="number" value="96" style="width:64px;margin-left:6px"></label>
-      <label class="pill"><input id="lockCenter" type="checkbox" checked style="margin-right:6px">Fast ROI i midten</label>
-      <button id="btnCenter" title="Centrér ROI nu">Centrér ROI</button>
-      <label class="pill">Tæl farve
-        <select id="colorSel" style="margin-left:6px">
-          <option value="red" selected>Kun RØD</option>
-          <option value="red_or_orange">RØD+ORANGE</option>
-          <option value="any">Alle</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="grid">
-      <div class="panel">
-        <div class="stat"><span>Status</span><strong id="statState">Idle</strong></div>
-        <div class="stat"><span>Blinks i aktuel cyklus</span><strong id="statBlinks">0</strong></div>
-        <div class="stat"><span>Sidste kode</span><strong id="statLast">-</strong></div>
-        <div class="stat"><span>Signal</span><strong id="statLevel">-</strong></div>
-        <div class="stat"><span>Farve</span><strong id="statColor">-</strong></div>
-      </div>
-      <div class="panel">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input id="manualCount" type="number" placeholder="Skriv antal blinks…" />
-          <button id="btnManual">Slå op manuelt</button>
-        </div>
-        <div id="lookup" class="status" style="margin-top:8px">Klar.</div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <strong>Instruktion</strong>
-      <ol>
-        <li>Tryk <em>Åbn kamera</em> og giv tilladelse.</li>
-        <li>Hold den blinkende <strong>røde</strong> LED i <strong>rammen midt på videoen</strong> (hvid firkant). Klik er ikke nødvendigt.</li>
-        <li>Vent én gentagelse. Koden vises automatisk.</li>
-      </ol>
-      <div class="footer">“Blink” iht. krav: OFF ≥ 100 ms efterfulgt af ON ≥ 100 ms. 7‑segment display ignoreres via form‑detektor.</div>
-    </div>
-
-    <div class="panel">
-      <strong>Fejlkode‑opslag (tilpas nedenfor)</strong>
-      <pre id="codeExplain" class="status">Indlæs en kode…</pre>
-    </div>
-
-    <div class="panel">
-      <strong>Tests</strong>
-      <div id="tests" class="status">Kører tests…</div>
-      <div class="footer">Tests dækker gruppering, minimum OFF/ON‑tider, farvefilter og formfilter.</div>
-    </div>
-
-    <div class="panel">
-      <strong>Diagnose</strong>
-      <div id="diag" class="status">Tryk “Diagnose” for detaljer.</div>
-    </div>
-
-    <div class="panel footer">
-      Kører lokalt. Host på HTTPS og sæt et QR‑klistermærke ved LED'en.
-    </div>
-  </main>
+  <h1>Table 3 — Input Status Bits</h1>
+  <p>URL-format: <code>?0001=1&0002=0&0011=1...</code></p>
+  <table id="tbl">
+    <thead><tr><th>Register</th><th>Name</th><th>State</th></tr></thead>
+    <tbody></tbody>
+  </table>
 </div>
-
 <script>
-// === VERSION ===
-var APP_VERSION = 'v0.12.5 (2025-10-07)';
-(function(){ var v=document.getElementById('ver'); if(v) v.textContent='Version: '+APP_VERSION; })();
+const rows = [
+ {reg:'0001', name:'Rotorguard Alarm', active:'Alarm'},
+ {reg:'0002', name:'V LO Alarm', active:'Alarm'},
+ {reg:'0003', name:'V HI Alarm', active:'Alarm'},
+ {reg:'0004', name:'I HI Alarm (Motor out short)', active:'Alarm'},
+ {reg:'0005', name:'Temperature High', active:'Warning'},
+ {reg:'0009', name:'Rotorguard Signal', active:'Pulse'},
+ {reg:'0010', name:'Overload / I Limit', active:'Warning'},
+ {reg:'0011', name:'Internal Stop', active:'Alarm (Stop)'},
+ {reg:'0012', name:'Rotor Blocked', active:'Alarm'},
+ {reg:'0013', name:'EEPROM Error', active:'Warning'},
+ {reg:'0014', name:'Comm. Error MOC', active:'Alarm'},
+ {reg:'0015', name:'Motor Phase Error', active:'Alarm'},
+ {reg:'0016', name:'Ripple', active:'Warning'},
+ {reg:'0017', name:'Digital Input 1', active:'HI'},
+ {reg:'0018', name:'Digital Input 2', active:'HI'},
+ {reg:'0019', name:'External 24 V Overload', active:'Overload'},
+ {reg:'0020', name:'MOC Bootloader Active', active:'Alarm'},
+ {reg:'0021', name:'Digital Input 3', active:'HI'},
+ {reg:'0022', name:'Digital Input 4', active:'HI'},
+ {reg:'0023', name:'Comm. Error IOM', active:'Warning'},
+ {reg:'0024', name:'Rotation OK', active:'OK'},
+ {reg:'0025', name:'Test Active', active:'Active'},
+ {reg:'0026', name:'Purge Active', active:'Active'},
+ {reg:'0027', name:'IO Config Mismatch', active:'Warning'},
+];
 
-// === KONFIG: Fejlkoder (rød 1/3/5) ===
-var ERROR_MAP = {
-  1: { title: 'Alarmkategori 1', fix: 'Kommunikation/timeout – tjek Modbus og stik.', details: 'Eksempel: Communication timeout.' },
-  3: { title: 'Alarmkategori 3', fix: 'Forsyning/indgang – mål net, faser og spænding.', details: 'Eksempel: Low/High Voltage, Input Phase.' },
-  5: { title: 'Alarmkategori 5', fix: 'Motor/output – tjek motor/ledninger/fejlstrøm.', details: 'Eksempel: Motor Phase, Motor Fault, Earth Fault, Rotor Blocked, Current Limit, Rotor Guard, MOC Comm, High Temp/Internal stop.' }
-};
+const params = new URLSearchParams(location.search);
+const tb = document.querySelector('#tbl tbody');
 
-// === STATE ===
-var els = {
-  video: document.getElementById('video'),
-  canvas: document.getElementById('canvas'),
-  overlay: document.getElementById('overlay'),
-  btnStart: document.getElementById('btnStart'),
-  btnStop: document.getElementById('btnStop'),
-  btnCal: document.getElementById('btnCal'),
-  btnDiag: document.getElementById('btnDiag'),
-  pauseMs: document.getElementById('pauseMs'),
-  roiSize: document.getElementById('roiSize'),
-  lockCenter: document.getElementById('lockCenter'),
-  btnCenter: document.getElementById('btnCenter'),
-  manualCount: document.getElementById('manualCount'),
-  btnManual: document.getElementById('btnManual'),
-  lookup: document.getElementById('lookup'),
-  codeExplain: document.getElementById('codeExplain'),
-  tests: document.getElementById('tests'),
-  statState: document.getElementById('statState'),
-  statBlinks: document.getElementById('statBlinks'),
-  statLast: document.getElementById('statLast'),
-  statLevel: document.getElementById('statLevel'),
-  statColor: document.getElementById('statColor'),
-  colorSel: document.getElementById('colorSel'),
-  diag: document.getElementById('diag')
-};
-
-var stream=null, running=false, rafId=null;
-var roi = null; // {x,y,size}
-var mu=0, s2=0, n=0; // adaptiv luminans
-var OFF_MIN=100, ON_MIN=100; // iht. SW7
-var phaseOn=false, phaseTs=0, offOk=false, onColorAtRise='unknown';
-var unitCount=0, lastUnitTs=0, lastCycle=0;
-var MIN_SHAPE = 0.05; // LED‑formkrav (center vs ring)
-
-function fmt(x){return Math.round(x*10)/10}
-function setState(s){ els.statState.textContent=s }
-
-function classifyColor(r,g,b){
-  var sum = r+g+b+1e-6; var rn=r/sum, gn=g/sum;
-  if(rn/gn > 1.4) return 'red'; if(gn/rn > 1.4) return 'green'; return 'orange';
-}
-function matchesFilter(color){
-  var m = els.colorSel.value; if(m==='any') return true; if(m==='red') return color==='red'; if(m==='red_or_orange') return (color==='red'||color==='orange'); return true;
-}
-
-function centerROI(){
-  var vw = els.video.videoWidth||0, vh = els.video.videoHeight||0; if(!vw||!vh) return;
-  var size = Math.max(8, Math.min(vw, vh, parseInt(els.roiSize.value)||96));
-  roi = { x: vw/2, y: vh/2, size: size };
-}
-
-async function startCam(){
-  try{
-    if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) throw new Error('Browser mangler getUserMedia');
-    if(!window.isSecureContext) throw new Error('Kræver HTTPS eller http://localhost');
-    try{ if(window.top !== window.self) throw new Error('Siden er indlejret (iframe) – åbnes som selvstændig fane'); }catch(_){ }
-
-    var tries = [
-      { video: { facingMode: { ideal: 'environment' } }, audio:false },
-      { video: { facingMode: 'environment' }, audio:false },
-      { video: true, audio:false }
-    ];
-    var errLast=null;
-    for(var i=0;i<tries.length;i++){ try{ stream = await navigator.mediaDevices.getUserMedia(tries[i]); break } catch(e){ errLast=e } }
-    if(!stream) throw errLast || new Error('Ukendt kamera‑fejl');
-
-    els.video.srcObject = stream; await els.video.play();
-    mu=0; s2=0; n=0; phaseOn=false; phaseTs=performance.now(); offOk=false; unitCount=0; lastUnitTs=0; lastCycle=0;
-    running=true; setState('Kører');
-
-    if(els.video.readyState>=2) centerROI();
-    els.video.addEventListener('loadedmetadata', function(){ centerROI(); }, {once:true});
-
-    els.btnStart.disabled = true; els.btnStop.disabled = false;
-    setupOverlay();
-    loop();
-  }catch(e){
-    els.diag.textContent = 'Kamera nægtet/fejl: '+ e.name + ' – ' + e.message + '
-• Chrome: klik 🔒 → Site settings → Camera: Allow
-• iOS/Safari: aA → Website Settings → Camera: Allow';
-    setState('Kamera‑fejl');
-  }
-}
-
-function stopCam(){
-  running=false; cancelAnimationFrame(rafId);
-  if(stream){ stream.getTracks().forEach(function(t){ t.stop() }); stream=null }
-  setState('Stoppet'); els.btnStart.disabled=false; els.btnStop.disabled=true;
-}
-
-function setupOverlay(){
-  function update(){
-    var vw=els.video.videoWidth||0, vh=els.video.videoHeight||0;
-    els.canvas.width=vw; els.canvas.height=vh;
-    // Brug videoens native koordinater i SVG via viewBox (CSS håndterer størrelse)
-    els.overlay.setAttribute('viewBox','0 0 '+vw+' '+vh);
-    drawRoi();
-  }
-  if(els.video.readyState>=2) update();
-  els.video.addEventListener('loadedmetadata', update, {once:true});
-  window.addEventListener('resize', update);
-}
-
-function drawRoi(){
-  var svg=els.overlay; svg.innerHTML=''; if(!roi) return;
-  var vw=els.video.videoWidth||0, vh=els.video.videoHeight||0; if(!vw||!vh) return;
-  var x=roi.x, y=roi.y, s=roi.size;
-  var ns=svg.namespaceURI;
-  var r=document.createElementNS(ns,'rect');
-  r.setAttribute('x', x- s/2); r.setAttribute('y', y- s/2);
-  r.setAttribute('width', s); r.setAttribute('height', s);
-  r.setAttribute('rx', 10); r.setAttribute('ry', 10);
-  r.setAttribute('fill', 'none'); r.setAttribute('stroke', '#ffffff'); r.setAttribute('stroke-width', '3');
-  var c1=document.createElementNS(ns,'line'); c1.setAttribute('x1', x-10); c1.setAttribute('y1', y); c1.setAttribute('x2', x+10); c1.setAttribute('y2', y); c1.setAttribute('stroke', '#ffffff'); c1.setAttribute('stroke-width', '3');
-  var c2=document.createElementNS(ns,'line'); c2.setAttribute('x1', x); c2.setAttribute('y1', y-10); c2.setAttribute('x2', x); c2.setAttribute('y2', y+10); c2.setAttribute('stroke', '#ffffff'); c2.setAttribute('stroke-width', '3');
-  svg.appendChild(r); svg.appendChild(c1); svg.appendChild(c2);
-}
-
-function sampleROI(ctx){
-  if(!roi){ return { yLum:0, r:0, g:0, b:0, shape:0 }; }
-  var s=roi.size|0; var x0=Math.max(0, Math.min(els.canvas.width-s, (roi.x - s/2)|0));
-  var y0=Math.max(0, Math.min(els.canvas.height-s, (roi.y - s/2)|0));
-  var img=ctx.getImageData(x0,y0,s,s); var data=img.data; var r=0,g=0,b=0,c=0; var lumTotal=0; var lumCenter=0, cntCenter=0;
-  var cx=s/2, cy=s/2; var rad = s*0.25;
-  for(var y=0;y<s;y++){
-    for(var x=0;x<s;x++){
-      var i=(y*s + x)*4; var R=data[i], G=data[i+1], B=data[i+2];
-      var lum = 0.2126*R + 0.7152*G + 0.0722*B; lumTotal += lum;
-      r+=R; g+=G; b+=B; c++;
-      var dx=x-cx, dy=y-cy; if(dx*dx + dy*dy <= rad*rad){ lumCenter += lum; cntCenter++; }
-    }
-  }
-  r/=c; g/=c; b/=c; var yLum = lumTotal/c/255; var centerAvg = (cntCenter? (lumCenter/cntCenter) : 0)/255; var outerAvg = ((lumTotal - lumCenter)/Math.max(1,(c - cntCenter)))/255; var shape = centerAvg - outerAvg;
-  return { yLum:yLum, r:r, g:g, b:b, shape:shape };
-}
-
-function processSample(on, color, now){
-  if(on!==phaseOn){
-    var dur=now - phaseTs;
-    if(!phaseOn && on){ if(dur>=OFF_MIN){ offOk=true } onColorAtRise=color }
-    else if(phaseOn && !on){ if(dur>=ON_MIN && offOk && matchesFilter(onColorAtRise)){ unitCount++; lastUnitTs=now; els.statBlinks.textContent=String(unitCount) } offOk=false }
-    phaseOn=on; phaseTs=now;
-  }
-  var pauseMs=parseInt(els.pauseMs.value)||900;
-  if(unitCount>0 && (now - lastUnitTs) >= pauseMs){ lastCycle=unitCount; unitCount=0; els.statBlinks.textContent='0'; els.statLast.textContent=String(lastCycle); showLookup(lastCycle) }
-}
-
-function loop(){
-  if(!running) return; rafId=requestAnimationFrame(loop); var v=els.video; if(!v.videoWidth) return; var ctx=els.canvas.getContext('2d',{willReadFrequently:true}); ctx.drawImage(v,0,0,els.canvas.width,els.canvas.height);
-  if(els.lockCenter.checked && (!roi || roi.size !== (parseInt(els.roiSize.value)||96))) centerROI();
-  drawRoi(); if(!roi){ els.statLevel.textContent='ROI ikke klar endnu…'; return }
-  var smp=sampleROI(ctx); var yLum=smp.yLum, r=smp.r, g=smp.g, b=smp.b, shape=smp.shape; n++; var d=yLum - mu; mu += d/n; s2 += d*(yLum - mu); var sigma=Math.sqrt(s2/Math.max(1,n-1)); var thHi=mu+3*sigma, thLo=mu+1*sigma; var nowOn=phaseOn; if(yLum>thHi && shape>=MIN_SHAPE) nowOn=true; else if(yLum<thLo) nowOn=false; var col= nowOn? classifyColor(r,g,b) : 'off'; els.statColor.textContent = nowOn? col : 'off'; processSample(nowOn,col,performance.now()); els.statLevel.textContent = (nowOn? 'ON':'off')+' · Y='+fmt(yLum)+' μ='+fmt(mu)+' σ='+fmt(sigma)+' thHi='+fmt(thHi)+' shape='+fmt(shape);
-}
-
-function showLookup(code){ var e=ERROR_MAP[code]; if(e){ els.lookup.textContent = code+' blink'+(code===1?'':'s')+' (rød) → '+e.title+'
-Løsning: '+e.fix+'
-Detaljer: '+e.details; els.codeExplain.textContent = code+': '+e.title+'
-'+e.fix+'
-'+e.details } else { els.lookup.textContent = code+' blinks → Ukendt kode. Tilpas ERROR_MAP i kilden.'; els.codeExplain.textContent = 'Ukendt kode: '+code+'. Opdatér ERROR_MAP.' } }
-
-// === Diagnose (uden optional chaining) ===
-function __runDiag(){
-  var L=[]; L.push('Version: '+APP_VERSION);
-  var uaActive = (navigator.userActivation && navigator.userActivation.isActive) ? navigator.userActivation.isActive : false;
-  L.push('User gesture OK? '+uaActive);
-  L.push('URL: '+location.href);
-  L.push('HTTPS: '+(location.protocol==='https:' || location.hostname==='localhost'));
-  L.push('SecureContext: '+(!!window.isSecureContext));
-  try{ L.push('Top‑level: '+(window.top===window.self)); }catch(_){ L.push('Top‑level: ukendt (cross‑origin)') }
-  L.push('mediaDevices: '+(!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)));
-  (async function(){
-    var perm=null; if(navigator.permissions && navigator.permissions.query){ try{ perm = await navigator.permissions.query({name:'camera'}); }catch(_){ } }
-    if(perm){ L.push('Permission(camera): '+perm.state); }
-    try{ var tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); tmp.getTracks().forEach(function(t){t.stop()}); L.push('Probe: getUserMedia OK (tilladelse givet).'); }
-    catch(e){ L.push('Probe fejl: '+e.name+' – '+e.message) }
-    var d=document.getElementById('diag'); if(d) d.textContent=L.join('
-');
-  })();
-}
-
-// === Robust UI binding ===
-function bindUI(){
-  if(els.btnStart){ els.btnStart.onclick = startCam }
-  if(els.btnStop){ els.btnStop.onclick = stopCam }
-  if(els.btnCal){ els.btnCal.onclick = function(){ mu=0; s2=0; n=0; } }
-  if(els.btnDiag){ els.btnDiag.onclick = __runDiag }
-  if(els.btnCenter){ els.btnCenter.onclick = function(){ centerROI(); drawRoi(); } }
-  if(els.roiSize){ els.roiSize.onchange = function(){ if(els.lockCenter.checked){ centerROI(); drawRoi(); } } }
-  if(els.btnManual){ els.btnManual.onclick = function(){ var nn=parseInt(els.manualCount.value||''); if(!isNaN(nn)) showLookup(nn) } }
-}
-window.addEventListener('DOMContentLoaded', function(){ try{ bindUI(); console.log('Init OK (DOMContentLoaded)', APP_VERSION);}catch(e){ var d=document.getElementById('diag'); if(d) d.textContent='Bind error: '+e; }});
-window.addEventListener('load', function(){ try{ if(!els.btnStart.onclick) bindUI(); console.log('Init OK (load)', APP_VERSION);}catch(e){ var d=document.getElementById('diag'); if(d) d.textContent='Bind(load) error: '+e; }});
-
-// Global fejl-fanger → vis i Diagnose-panelet
-window.onerror = function(msg, src, line, col, err){ var d=document.getElementById('diag'); if(d) d.textContent = 'JS-fejl: '+msg+' @'+line+':'+col; };
-window.onunhandledrejection = function(e){ var d=document.getElementById('diag'); if(d) d.textContent = 'Promise-fejl: '+(e && e.reason && e.reason.message ? e.reason.message : (e && e.reason ? e.reason : 'ukendt')); };
-
-// === TESTS (ingen kamera krævet) ===
-function decodeCyclesFromOnEdges(tsArray, pause){ var out=[]; var c=0; var prev; for(var i=0;i<tsArray.length;i++){ var t=tsArray[i]; if(prev!==undefined && (t-prev)>=pause){ if(c>0) out.push(c); c=0 } c++; prev=t } if(c>0) out.push(c); return out }
-function simulateBlinkSequence(seq, pause, filter){ phaseOn=false; phaseTs=0; offOk=false; unitCount=0; lastUnitTs=0; lastCycle=0; els.colorSel.value = filter||'red'; var t=0; for(var i=0;i<seq.length;i++){ var s=seq[i]; var steps=Math.max(1,Math.round(s.dur/50)); for(var j=0;j<steps;j++){ processSample(s.on,s.color,t); t+=50 } } processSample(false,'off',t+pause+10); return lastCycle }
-function runTests(){ var results=[]; var pause=900; var tests=[ {name:'1) Enkelt cyklus, 3 blinks', inp:[100,300,500], exp:[3]}, {name:'2) To cyklusser 2 + 5', inp:[0,200, 2000,2200,2400,2600,2800], exp:[2,5]}, {name:'3) Grænsetilfælde præcis ved pause (split)', inp:[0,200, 1100,1300], exp:[2,2]}, {name:'4) Hurtige blinks (ingen split)', inp:[0,150,260,370,480], exp:[5]}, {name:'5) Tom input', inp:[], exp:[]}, {name:'6) Opslag eksisterende kode (3)', inp:[0,100,200], exp:[3], mapCheck:3}, {name:'7) Opslag ukendt kode (7)', inp:[0,100,200,300,400,500,600], exp:[7], mapCheck:7}, {name:'8) Single blink', inp:[500], exp:[1]}, {name:'9) Stor pause før første', inp:[2000,2100], exp:[2]}, {name:'10) Tre cyklusser 1+1+1', inp:[0, 2000, 4000], exp:[1,1,1]} ];
-  for(var k=0;k<tests.length;k++){ var t=tests[k]; var got=decodeCyclesFromOnEdges(t.inp,pause); var ok=JSON.stringify(got)===JSON.stringify(t.exp); if(!ok){ results.push('❌ '+t.name+': exp '+JSON.stringify(t.exp)+' got '+JSON.stringify(got)); continue } if(t.mapCheck!==undefined){ var has=!!ERROR_MAP[t.mapCheck]; if(t.mapCheck===3 && !has) results.push('❌ Opslag: forventede kode 3 i ERROR_MAP'); else if(t.mapCheck===7 && has) results.push('❌ Opslag: kode 7 burde være ukendt i ERROR_MAP'); else results.push('✅ '+t.name) } else { results.push('✅ '+t.name) } }
-  var seq1=[ {dur:200,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'}, {dur:120,on:false,color:'off'}, {dur:120,on:true,color:'red'} ]; var got1=simulateBlinkSequence(seq1,pause,'red'); results.push(got1===3? '✅ 11) SW7: 3 gyldige røde blinks' : '❌ 11) SW7: exp 3 got '+got1);
-  var seq2=[ {dur:80,on:false,color:'off'}, {dur:150,on:true,color:'red'} ]; var got2=simulateBlinkSequence(seq2,pause,'red'); results.push(got2===0? '✅ 12) OFF <100ms ignoreres' : '❌ 12) SW7: exp 0 got '+got2);
-  var seq3=[ {dur:150,on:false,color:'off'}, {dur:80,on:true,color:'red'} ]; var got3=simulateBlinkSequence(seq3,pause,'red'); results.push(got3===0? '✅ 13) ON <100ms ignoreres' : '❌ 13) SW7: exp 0 got '+got3);
-  els.tests.innerHTML = results.map(function(r){return r.indexOf('✅')===0? '<span class="pass">'+r+'</span>' : '<span class="fail">'+r+'</span>'}).join('
-');
-}
-runTests();
-
-// Eksportér til globalt scope + dræn eventuelle klik i køen
-try{ window.__runDiag = __runDiag; }catch(_){}
-try{ window.startCam = startCam; }catch(_){}
-try{ window.stopCam = stopCam; }catch(_){}
-
-document.addEventListener('DOMContentLoaded', function(){
-  try{ var q=window.__clickQueue||[]; while(q.length){ var n=q.shift(); if(typeof window[n]==='function'){ try{ window[n](); }catch(e){} } } }catch(_){ }
+rows.forEach(r=>{
+  const v = params.get(r.reg);
+  const state = (v === '1') ? r.active : '0';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>1x${r.reg}</td><td>${r.name}</td><td class="state">${state}</td>`;
+  tb.appendChild(tr);
 });
 </script>
-</body>
-</html>
