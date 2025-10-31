@@ -5,112 +5,142 @@
 <title>DRHX – Table 3 (Input Status Bits)</title>
 <style>
   body{font:15px system-ui,Segoe UI,Arial;margin:0;background:#fafafa}
-  .wrap{max-width:760px;margin:24px auto;padding:16px;background:#fff;border:1px solid #eee;border-radius:10px}
+  .wrap{max-width:860px;margin:24px auto;padding:16px;background:#fff;border:1px solid #eee;border-radius:10px}
   h1{font-size:18px;margin:0 0 10px}
   p{color:#666;font-size:13px;margin:0 0 12px}
   table{border-collapse:collapse;width:100%}
   th,td{border:1px solid #e5e5e5;padding:6px 8px}
   th{background:#f6f6f6;text-align:left}
-  td.state{white-space:nowrap}
-  .banner{padding:10px 12px;border-radius:8px;margin:0 0 12px;font-weight:600;border:1px solid transparent}
-  .ok{background:#e8f5e9;color:#1b5e20;border-color:#c8e6c9}
-  .warn{background:#fff8e1;color:#795548;border-color:#ffe082}
-  .crit{background:#ffebee;color:#b71c1c;border-color:#ffcdd2}
-  .sub{margin:-6px 0 12px;color:#555;font-size:12px}
-  code{background:#f3f3f3;padding:1px 4px;border-radius:4px}
+  td.state{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .banner{padding:10px 12px;border-radius:8px;margin:0 0 12px;display:none}
+  .banner.err{background:#ffe8e6;color:#8a1008;border:1px solid #f3c2bd}
+  .banner.ok{background:#e9f7ef;color:#0a6e2b;border:1px solid #c6ecd2}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{background:#fee;border:1px solid #f8caca;padding:4px 8px;border-radius:999px}
+  .muted{color:#777}
+  code{background:#f2f2f2;padding:1px 4px;border-radius:4px}
 </style>
 <div class="wrap">
-  <div id="faultBanner" class="banner ok">Fejlkode: Ingen (OK)</div>
-  <p id="faultSub" class="sub" hidden></p>
-
   <h1>Table 3 — Input Status Bits</h1>
-  <p>URL-format: <code>?0001=1&0002=0&0011=1...</code></p>
+  <p class="muted">Scan NFC: virker første gang og opdaterer eksisterende fane ved senere scans. Brug fragment: <code>#0001=1&0011=1&err=E12</code>.</p>
+  <div id="errBanner" class="banner err"></div>
+  <div id="okBanner" class="banner ok">Ingen aktive fejl.</div>
+  <div id="activeErrors" class="chips" aria-live="polite" aria-label="Aktive fejl"></div>
   <table id="tbl">
-    <thead><tr><th>Register</th><th>Name</th><th>State</th></tr></thead>
+    <thead><tr><th>Register</th><th>Navn</th><th>Aktiv værdi</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
 <script>
+/*** --- UI MODEL --- ***/
 const rows = [
- {reg:'0001', name:'Rotorguard Alarm', active:'Alarm'},
- {reg:'0002', name:'V LO Alarm', active:'Alarm'},
- {reg:'0003', name:'V HI Alarm', active:'Alarm'},
- {reg:'0004', name:'I HI Alarm (Motor out short)', active:'Alarm'},
- {reg:'0005', name:'Temperature High', active:'Warning'},
- {reg:'0009', name:'Rotorguard Signal', active:'Pulse'},
- {reg:'0010', name:'Overload / I Limit', active:'Warning'},
- {reg:'0011', name:'Internal Stop', active:'Alarm (Stop)'},
- {reg:'0012', name:'Rotor Blocked', active:'Alarm'},
- {reg:'0013', name:'EEPROM Error', active:'Warning'},
- {reg:'0014', name:'Comm. Error MOC', active:'Alarm'},
- {reg:'0015', name:'Motor Phase Error', active:'Alarm'},
- {reg:'0016', name:'Ripple', active:'Warning'},
- {reg:'0017', name:'Digital Input 1', active:'HI'},
- {reg:'0018', name:'Digital Input 2', active:'HI'},
- {reg:'0019', name:'External 24 V Overload', active:'Overload'},
- {reg:'0020', name:'MOC Bootloader Active', active:'Alarm'},
- {reg:'0021', name:'Digital Input 3', active:'HI'},
- {reg:'0022', name:'Digital Input 4', active:'HI'},
- {reg:'0023', name:'Comm. Error IOM', active:'Warning'},
- {reg:'0024', name:'Rotation OK', active:'OK'},
- {reg:'0025', name:'Test Active', active:'Active'},
- {reg:'0026', name:'Purge Active', active:'Active'},
- {reg:'0027', name:'IO Config Mismatch', active:'Warning'},
+ {reg:'0001', name:'Rotorguard Alarm',              active:'Alarm'},
+ {reg:'0002', name:'V LO Alarm',                    active:'Alarm'},
+ {reg:'0003', name:'V HI Alarm',                    active:'Alarm'},
+ {reg:'0004', name:'I HI Alarm (Motor out short)',  active:'Alarm'},
+ {reg:'0005', name:'Temperature High',              active:'Warning'},
+ {reg:'0006', name:'Reserved',                      active:'1'},
+ {reg:'0007', name:'Reserved',                      active:'1'},
+ {reg:'0008', name:'Reserved',                      active:'1'},
+ {reg:'0009', name:'Rotorguard Signal',             active:'Pulse'},
+ {reg:'0010', name:'Overload / I Limit',            active:'Warning'},
+ {reg:'0011', name:'Internal Stop',                 active:'Alarm (Stop)'},
+ {reg:'0012', name:'Rotor Blocked',                 active:'Alarm'},
+ {reg:'0013', name:'EEPROM Error',                  active:'Warning'},
+ {reg:'0014', name:'Comm. Error MOC',               active:'Alarm'},
+ {reg:'0015', name:'Motor Phase Error',             active:'Alarm'},
+ {reg:'0016', name:'Ripple',                        active:'Warning'},
+ {reg:'0017', name:'Digital Input 1',               active:'HI'},
+ {reg:'0018', name:'Digital Input 2',               active:'HI'},
+ {reg:'0019', name:'External 24 V Overload',        active:'Overload'},
+ {reg:'0020', name:'MOC Bootloader Active',         active:'Alarm'},
+ {reg:'0021', name:'Digital Input 3',               active:'HI'},
+ {reg:'0022', name:'Digital Input 4',               active:'HI'},
+ {reg:'0023', name:'Comm. Error IOM',               active:'Warning'},
+ {reg:'0024', name:'Rotation OK',                   active:'OK'},
+ {reg:'0025', name:'Test Active',                   active:'Active'},
+ {reg:'0026', name:'Purge Active',                  active:'Active'},
+ {reg:'0027', name:'IO Config Mismatch',            active:'Warning'}
 ];
-
-// Valgfrie fejlkoder (viser '—' hvis ukendt)
-const codeMap = {
- '0001':'E01',
- '0003':'E02',
- '0002':'E03',
- '0004':'E04',
- '0005':'E05',
- '0012':'E06',
- '0015':'E08'
-};
-
-const params = new URLSearchParams(location.search);
 const tb = document.querySelector('#tbl tbody');
-const bit = r => params.get(r) === '1';
-
-// Udfyld tabellen
+const errBanner = document.getElementById('errBanner');
+const okBanner  = document.getElementById('okBanner');
+const activeErrorsEl = document.getElementById('activeErrors');
 rows.forEach(r=>{
-  const v = params.get(r.reg);
-  const state = (v === '1') ? r.active : '0';
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td>1x${r.reg}</td><td>${r.name}</td><td class="state">${state}</td>`;
+  tr.innerHTML = `<td>1x${r.reg}</td><td>${r.name}</td>
+                  <td class="state" data-reg="${r.reg}" data-active="${r.active}">0</td>`;
   tb.appendChild(tr);
 });
-
-// Alle aktive fejl (Alarm/Warning)
-const activeErrors = rows.filter(r => bit(r.reg) && /Alarm|Warning/.test(r.active));
-const hasCrit = activeErrors.some(r => /Alarm/.test(r.active)); // "Alarm (Stop)" = kritisk
-const banner = document.getElementById('faultBanner');
-
-if (activeErrors.length === 0){
-  banner.className = 'banner ok';
-  banner.textContent = 'Fejlkode: Ingen (OK)';
-} else {
-  banner.className = 'banner ' + (hasCrit ? 'crit' : 'warn');
-  const list = activeErrors.map(r => `${codeMap[r.reg] || '—'} ${r.name} (1x${r.reg})`);
-  banner.textContent = 'Fejl: ' + list.join(' · ');
+const nonErrorRegs = new Set(['0017','0018','0021','0024','0025','0026']);
+function setBanner(errText, hasAnyError){
+  if (errText){ errBanner.style.display='block'; errBanner.textContent=errText; }
+  else { errBanner.style.display='none'; errBanner.textContent=''; }
+  okBanner.style.display = hasAnyError ? 'none' : 'block';
 }
-
-// Ekstra indikatorer (vises som note)
-function indicators(){
-  const list = [];
-  if (bit('0011')) list.push('1x0011 Internal Stop');
-  if (bit('0014')) list.push('1x0014 Comm. Error MOC');
-  if (bit('0023')) list.push('1x0023 Comm. Error IOM');
-  if (bit('0009')) list.push('1x0009 Rotorguard Signal');
-  if (bit('0024')) list.push('1x0024 Rotation OK');
-  return list;
+function applyParams(paramStr){
+  const s = (paramStr.startsWith('#')||paramStr.startsWith('?')) ? paramStr.slice(1) : paramStr;
+  const p = new URLSearchParams(s);
+  p.forEach((v,k)=>{
+    const cell = document.querySelector(`[data-reg="${k}"]`);
+    if (!cell) return;
+    const activeLabel = cell.dataset.active || '1';
+    cell.textContent = (v === '1') ? activeLabel : '0';
+  });
+  activeErrorsEl.innerHTML = '';
+  let hasError = false;
+  rows.forEach(r=>{
+    const v = p.get(r.reg);
+    if (v === '1' && !nonErrorRegs.has(r.reg)){
+      hasError = true;
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = `1x${r.reg} — ${r.name}`;
+      activeErrorsEl.appendChild(chip);
+    }
+  });
+  const errCode = p.get('err');
+  setBanner(errCode ? `Fejlkode: ${errCode}` : '', hasError);
+  if (paramStr) history.replaceState(null,'','#'+p.toString());
 }
-const sub = document.getElementById('faultSub');
-const hints = indicators();
-if (hints.length){
-  sub.hidden = false;
-  sub.textContent = 'Aktive indikatorer: ' + hints.join(' · ');
+/*** --- VIRKER FØRSTE GANG + SINGLE-TAB UPDATE (uden SW) --- ***/
+const CHANNEL = 'drhx-nfc';
+const TAB_ID = Math.random().toString(36).slice(2);
+let isController = false, sawControllerAck = false;
+const hasBC = 'BroadcastChannel' in window;
+const bc = hasBC ? new BroadcastChannel(CHANNEL) : null;
+function postBus(msg){
+  const payload = JSON.stringify({...msg, from:TAB_ID, ts:Date.now()});
+  if (bc) bc.postMessage(JSON.parse(payload));
+  else localStorage.setItem('drhx_bus', payload);
+}
+function onBus(evt){
+  const data = evt.data || (evt.newValue ? JSON.parse(evt.newValue) : null);
+  if (!data || data.from === TAB_ID) return;
+  const {type, payload} = data;
+  if (type === 'who-is-controller') {
+    if (isController) postBus({type:'controller-ack'});
+  } else if (type === 'nfc-update') {
+    if (isController){ applyParams(payload); postBus({type:'controller-ack'}); }
+  } else if (type === 'controller-ack') {
+    sawControllerAck = true; tryCloseSelf();
+  }
+}
+if (bc) bc.onmessage = onBus;
+else window.addEventListener('storage', e=>{ if (e.key==='drhx_bus') onBus(e); });
+const incoming = location.search || location.hash;
+if (incoming) postBus({type:'nfc-update', payload: incoming});
+postBus({type:'who-is-controller'});
+setTimeout(()=>{
+  if (!sawControllerAck){ isController = true; if (incoming) applyParams(incoming); }
+}, 150);
+function tryCloseSelf(){
+  setTimeout(()=>{
+    try{ window.close(); }catch(e){}
+    const canonical = location.origin + location.pathname;
+    if (location.href !== canonical) location.replace(canonical);
+    document.body.innerHTML = '<div class="wrap"><p>Opdaterede aktiv fane. Du kan skifte tilbage.</p></div>';
+  }, 50);
 }
 </script>
 </html>
