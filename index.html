@@ -12,8 +12,17 @@
   th,td{border:1px solid #e5e5e5;padding:6px 8px}
   th{background:#f6f6f6;text-align:left}
   td.state{white-space:nowrap}
+  .banner{padding:10px 12px;border-radius:8px;margin:0 0 12px;font-weight:600;border:1px solid transparent}
+  .ok{background:#e8f5e9;color:#1b5e20;border-color:#c8e6c9}
+  .warn{background:#fff8e1;color:#795548;border-color:#ffe082}
+  .crit{background:#ffebee;color:#b71c1c;border-color:#ffcdd2}
+  .sub{margin:-6px 0 12px;color:#555;font-size:12px}
+  code{background:#f3f3f3;padding:1px 4px;border-radius:4px}
 </style>
 <div class="wrap">
+  <div id="faultBanner" class="banner ok">Fejlkode: Ingen (OK)</div>
+  <p id="faultSub" class="sub" hidden></p>
+
   <h1>Table 3 — Input Status Bits</h1>
   <p>URL-format: <code>?0001=1&0002=0&0011=1...</code></p>
   <table id="tbl">
@@ -51,7 +60,9 @@ const rows = [
 
 const params = new URLSearchParams(location.search);
 const tb = document.querySelector('#tbl tbody');
+const bit = r => params.get(r) === '1';
 
+// udfyld tabellen
 rows.forEach(r=>{
   const v = params.get(r.reg);
   const state = (v === '1') ? r.active : '0';
@@ -59,4 +70,40 @@ rows.forEach(r=>{
   tr.innerHTML = `<td>1x${r.reg}</td><td>${r.name}</td><td class="state">${state}</td>`;
   tb.appendChild(tr);
 });
+
+// beregn og vis fejlkode (heuristik baseret på Table 3)
+function computeFault(){
+  if (bit('0001')) return {code:'E01', text:'Rotorguard Alarm', sev:'crit'};
+  if (bit('0003')) return {code:'E02', text:'V HI Alarm', sev:'crit'};
+  if (bit('0002')) return {code:'E03', text:'V LO Alarm', sev:'crit'};
+  if (bit('0004')) return {code:'E04', text:'I HI Alarm (Motor out short)', sev:'crit'};
+  if (bit('0012')) return {code:'E06', text:'Rotor Blocked', sev:'crit'};
+  if (bit('0015')) return {code:'E08', text:'Motor Phase Error', sev:'crit'};
+  if (bit('0005')) return {code:'E05', text:'Temperature High', sev:'warn'};
+  return {code:null, text:'Ingen (OK)', sev:'ok'};
+}
+
+function indicators(){
+  const list = [];
+  if (bit('0011')) list.push('1x0011 Internal Stop');
+  if (bit('0014')) list.push('1x0014 Comm. Error MOC');
+  if (bit('0023')) list.push('1x0023 Comm. Error IOM');
+  if (bit('0009')) list.push('1x0009 Rotorguard Signal');
+  if (bit('0024')) list.push('1x0024 Rotation OK');
+  return list;
+}
+
+const f = computeFault();
+const banner = document.getElementById('faultBanner');
+banner.className = 'banner ' + f.sev;
+banner.textContent = 'Fejlkode: ' + (f.code ? (f.code + ' – ' + f.text) : 'Ingen (OK)');
+
+// vis ekstra indikatorer hvis nogen
+const sub = document.getElementById('faultSub');
+const hints = indicators();
+if (hints.length){
+  sub.hidden = false;
+  sub.textContent = 'Aktive indikatorer: ' + hints.join(' · ');
+}
 </script>
+</html>
